@@ -24,6 +24,23 @@ optimizer1 = TAdam(net1.parameters())
 optimizer2 = TYogi(net2.parameters())
 ```
 
+## How to cite:
+ If you employ the t-momentum based optimizers in your Machine Learning application, please cite us using the following:
+
+**Journal Paper**
+
+To come.
+
+**Arxiv Preprint**
+```
+@article{ilboudo2020tadam,
+  title={TAdam: A Robust Stochastic Gradient Optimizer},
+  author={Ilboudo, Wendyam Eric Lionel and Kobayashi, Taisuke and Sugimoto, Kenji},
+  journal={arXiv preprint arXiv:2003.00179},
+  year={2020}
+}
+```
+
 ## Note
  This repository is implemented in pytorch.
  A tensorflow implementation of the t-momentum integrated to various optimizers would be really appreciated. Don't hesitate to PR.
