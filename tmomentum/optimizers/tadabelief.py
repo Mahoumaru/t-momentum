@@ -4,14 +4,32 @@ import math
 import torch
 from torch.optim import Optimizer
 
-class TAdaBound(Optimizer):
-    r"""Implements a Robust version of AdaBound.
+class TAdaBelief(Optimizer):
+    r"""Implements a Robust version of Adam.
 
-    .. _AdaBound: Adaptive Gradient Methods with Dynamic Bound of Learning Rate:
-          https://openreview.net/pdf?id=Bkg3g2R9FX
+    Arguments:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float, optional): learning rate (default: 1e-3)
+        betas (Tuple[float, float], optional): coefficients used for computing
+            running averages of gradient and its square (default: (0.9, 0.999))
+        eps (float, optional): term added to the denominator to improve
+            numerical stability (default: 1e-8)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        amsgrad (boolean or [0,1], optional): to use the AMSGrad variant of this
+            algorithm from the paper `On the Convergence of Adam and Beyond`_
+            if float is given, v_max is decayed (default: False)
+        k_dof (float or inf, optional): the degrees of freedom of the student-t
+            distribution nu is defined as k_dof * dimension of the param_groups
+            (default: 1.0)
+
+    .. _Adam\: A Method for Stochastic Optimization:
+        https://arxiv.org/abs/1412.6980
+    .. _On the Convergence of Adam and Beyond:
+        https://openreview.net/forum?id=ryQu7f-RZ
     """
 
-    def __init__(self, params, lr=1e-3, k_dof=1.0, betas=(0.9, 0.999), final_lr=0.01, gamma=1e-3,
+    def __init__(self, params, lr=1e-3, k_dof=1.0, betas=(0.9, 0.999),
                  eps=1e-8, weight_decay=0, amsgrad=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -21,28 +39,23 @@ class TAdaBound(Optimizer):
             raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
-        if not 0.0 <= final_lr:
-            raise ValueError("Invalid final learning rate: {}".format(final_lr))
-        if not 0.0 <= gamma < 1.0:
-            raise ValueError("Invalid gamma parameter: {}".format(gamma))
         if not (0.0 < k_dof or math.inf == k_dof):
             raise ValueError("Invalid degrees of freedom scale factor: {}".format(k_dof))
         if not 0.0 <= amsgrad <= 1.0:
             raise ValueError("Invalid amsgrad parameter: {}".format(amsgrad))
-        defaults = dict(lr=lr, k_dof=k_dof, betas=betas, final_lr=final_lr, gamma=gamma, eps=eps,
+        defaults = dict(lr=lr, k_dof=k_dof, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad)
-        super(TAdaBound, self).__init__(params, defaults)
-
-        self.base_lrs = list(map(lambda group: group['lr'], self.param_groups))
+        super(TAdaBelief, self).__init__(params, defaults)
 
     def __setstate__(self, state):
-        super(TAdaBound, self).__setstate__(state)
+        super(TAdaBelief, self).__setstate__(state)
         # for group in self.param_groups:
         #     group.setdefault('amsgrad', False)
 
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
+
         Arguments:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
@@ -51,13 +64,13 @@ class TAdaBound(Optimizer):
         if closure is not None:
             loss = closure()
 
-        for group, base_lr in zip(self.param_groups, self.base_lrs):
+        for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
                 grad = p.grad
                 if grad.is_sparse:
-                    raise RuntimeError('TAdaBound, just as Adam, does not support sparse gradients, please consider SparseAdam instead')
+                    raise RuntimeError('TAdaBelief, just as Adam, does not support sparse gradients, please consider SparseAdam instead')
                 amsgrad = group['amsgrad']
                 beta1, beta2 = group['betas']
 
@@ -77,7 +90,7 @@ class TAdaBound(Optimizer):
                     state['W_t'] = torch.tensor(0.0).type_as(p) + beta1 / (1.0 - beta1)
                     # Dimension d of the parameters
                     state['dim'] = float(p.numel())
-                    # Degrees of freedom, initialized to the parameters dimension
+                    # Degrees of freedom, initialized to the parameters dimension or to the user specified value
                     if not group["k_dof"] == math.inf:
                         state['dof'] = torch.tensor(0.0).type_as(p) + group["k_dof"] * state['dim']
 
@@ -104,7 +117,7 @@ class TAdaBound(Optimizer):
                 exp_avg.mul_(betaw).add_(grad, alpha=1.0 - betaw)
                 
                 # second-order momentum
-                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1.0 - beta2)
+                exp_avg_sq.mul_(beta2).add_(grad.sub(exp_avg).square_().mul_(1.0 - beta2))
                 if amsgrad:
                     # Maintains the maximum of all 2nd moment running avg. till now
                     torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
@@ -113,17 +126,8 @@ class TAdaBound(Optimizer):
                 else:
                     denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
 
-                # adabound
+                # update parameter
                 step_size = group['lr'] / bias_correction1
-
-                # Applies bounds on actual learning rate
-                # lr_scheduler cannot affect final_lr, this is a workaround to apply lr decay
-                final_lr = group['final_lr'] * group['lr'] / base_lr
-                lower_bound = final_lr * (1.0 - 1.0 / (group['gamma'] * state['step'] + 1.0))
-                upper_bound = final_lr * (1.0 + 1.0 / (group['gamma'] * state['step']))
-                step_size = torch.full_like(denom, step_size)
-                step_size.div_(denom).clamp_(lower_bound, upper_bound).mul_(exp_avg)
-
-                p.add_(-step_size)
+                p.addcdiv_(exp_avg, denom, value=-step_size)
 
         return loss
