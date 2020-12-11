@@ -9,12 +9,18 @@
  
 ## How to use:
 
-1. Install with pip
+1. Install
+- with pip
+```
+pip install tmomentum
+```
+- or clone and install:
 ```
 git clone https://github.com/Mahoumaru/t-momentum.git
 cd t-momentum
 pip install -e .
 ```
+
 2. Import and use each optimizer just like you would use an official pytorch optimizer (adjust hyperparameters such as learning rate, k_dof, betas, weight_decay, amsgrad, etc.)
 ```python
 from tmomentum.optimizers.TAdam import TAdam
