@@ -19,8 +19,8 @@ pip install -e .
 
 2. Import and use each optimizer just like you would use an official pytorch optimizer (adjust hyperparameters such as learning rate, k_dof, betas, weight_decay, amsgrad, etc.)
 ```python
-from tmomentum.optimizers.TAdam import TAdam
-from tmomentum.optimizers.TYogi import TYogi
+from tmomentum.optimizers import TAdam
+from tmomentum.optimizers import TYogi
 
 optimizer1 = TAdam(net1.parameters())
 optimizer2 = TYogi(net2.parameters())
