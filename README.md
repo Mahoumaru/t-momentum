@@ -10,11 +10,7 @@
 ## How to use:
 
 1. Install
-- with pip
-```
-pip install tmomentum
-```
-- or clone and install:
+- clone and install:
 ```
 git clone https://github.com/Mahoumaru/t-momentum.git
 cd t-momentum
