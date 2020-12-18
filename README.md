@@ -4,6 +4,7 @@
  Official repository for the t-momentum algorithm.
 
 **Journal Paper**: *Robust Stochastic Gradient Descent with Student-t Distribution based First-order Momentum* (Accepted for publication in the IEEE Transactions on Neural Networks and Learning Systems journal).
+[*Robust Stochastic Gradient Descent With Student-t Distribution Based First-Order Momentum*](https://ieeexplore.ieee.org/document/9296551)
 
 **Arxiv Preprint** (early version. Focuses only on the integration of the t-momentum to Adam. Corresponding repository [here](https://github.com/Mahoumaru/TAdam)): [*TAdam: A Robust Stochastic Gradient Optimizer*](http://arxiv.org/abs/2003.00179)
  
@@ -31,16 +32,24 @@ optimizer2 = TYogi(net2.parameters())
 
 **Journal Paper**
 
-To come.
-
-**Arxiv Preprint**
+##### Plain Text
 ```
-@article{ilboudo2020tadam,
-  title={TAdam: A Robust Stochastic Gradient Optimizer},
-  author={Ilboudo, Wendyam Eric Lionel and Kobayashi, Taisuke and Sugimoto, Kenji},
-  journal={arXiv preprint arXiv:2003.00179},
-  year={2020}
-}
+W. E. L. Ilboudo, T. Kobayashi and K. Sugimoto,
+"Robust Stochastic Gradient Descent With Student-t Distribution Based First-Order Momentum,"
+in IEEE Transactions on Neural Networks and Learning Systems, doi: 10.1109/TNNLS.2020.3041755.
+```
+
+##### Bibtex
+```
+@ARTICLE{9296551,
+  author={W. E. L. {Ilboudo} and T. {Kobayashi} and K. {Sugimoto}},
+  journal={IEEE Transactions on Neural Networks and Learning Systems}, 
+  title={Robust Stochastic Gradient Descent With Student-t Distribution Based First-Order Momentum}, 
+  year={2020},
+  volume={},
+  number={},
+  pages={1-14},
+  doi={10.1109/TNNLS.2020.3041755}}
 ```
 
 ## Note
