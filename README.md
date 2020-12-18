@@ -3,7 +3,7 @@
 
  Official repository for the t-momentum algorithm.
 
-**Journal Paper**: *Robust Stochastic Gradient Descent with Student-t Distribution based First-order Momentum* (Accepted for publication in the IEEE Transactions on Neural Networks and Learning Systems journal).
+**Journal Paper** (Accepted for publication in the IEEE Transactions on Neural Networks and Learning Systems journal):
 [*Robust Stochastic Gradient Descent With Student-t Distribution Based First-Order Momentum*](https://ieeexplore.ieee.org/document/9296551)
 
 **Arxiv Preprint** (early version. Focuses only on the integration of the t-momentum to Adam. Corresponding repository [here](https://github.com/Mahoumaru/TAdam)): [*TAdam: A Robust Stochastic Gradient Optimizer*](http://arxiv.org/abs/2003.00179)
