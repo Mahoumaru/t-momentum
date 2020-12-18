@@ -30,8 +30,6 @@ optimizer2 = TYogi(net2.parameters())
 ## How to cite:
  If you employ the t-momentum based optimizers in your Machine Learning application, please cite us using the following:
 
-**Journal Paper**
-
 ##### Plain Text
 ```
 W. E. L. Ilboudo, T. Kobayashi and K. Sugimoto,
