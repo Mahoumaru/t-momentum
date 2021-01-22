@@ -1,1 +1,1 @@
-from tmomentum.utils.tmomentum import TMomentum 
+from .tmomentum import TMomentum 

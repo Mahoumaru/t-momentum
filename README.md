@@ -7,11 +7,15 @@
 [*Robust Stochastic Gradient Descent With Student-t Distribution Based First-Order Momentum*](https://ieeexplore.ieee.org/document/9296551)
 
 **Arxiv Preprint** (early version. Focuses only on the integration of the t-momentum to Adam. Corresponding repository [here](https://github.com/Mahoumaru/TAdam)): [*TAdam: A Robust Stochastic Gradient Optimizer*](http://arxiv.org/abs/2003.00179)
- 
+
 ## How to use:
 
 1. Install
-- clone and install:
+- install with pip:
+```
+pip install tmomentum
+```
+- or clone and install:
 ```
 git clone https://github.com/Mahoumaru/t-momentum.git
 cd t-momentum
@@ -41,8 +45,8 @@ in IEEE Transactions on Neural Networks and Learning Systems, doi: 10.1109/TNNLS
 ```
 @ARTICLE{9296551,
   author={W. E. L. {Ilboudo} and T. {Kobayashi} and K. {Sugimoto}},
-  journal={IEEE Transactions on Neural Networks and Learning Systems}, 
-  title={Robust Stochastic Gradient Descent With Student-t Distribution Based First-Order Momentum}, 
+  journal={IEEE Transactions on Neural Networks and Learning Systems},
+  title={Robust Stochastic Gradient Descent With Student-t Distribution Based First-Order Momentum},
   year={2020},
   volume={},
   number={},
