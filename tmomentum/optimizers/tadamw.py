@@ -3,10 +3,13 @@
 import math
 import torch
 from torch.optim.optimizer import Optimizer
+from . import _temafunctional as tF
 
 class TAdamW(Optimizer):
 
-    def __init__(self, params, lr=1e-3, k_dof=1.0, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, warmup = 0):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999),
+                 eps=1e-8, weight_decay=0, warmup=0,
+                 k_dof=1.0, beta_dof=0.999):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -15,11 +18,13 @@ class TAdamW(Optimizer):
             raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
-        if not (0.0 <= k_dof or math.inf == k_dof):
+        if not (0.0 < k_dof or math.inf == k_dof):
             raise ValueError("Invalid degrees of freedom scale factor: {}".format(k_dof))
-
-        defaults = dict(lr=lr, k_dof=k_dof, betas=betas, eps=eps,
-                        weight_decay=weight_decay, warmup = warmup)
+        if not 0.0 <= beta_dof <= 1.0:
+            raise ValueError("Invalid beta parameter for dof optimisation: {}".format(beta_dof))
+        defaults = dict(lr=lr, betas=betas, eps=eps,
+                        weight_decay=weight_decay, warmup=warmup,
+                        k_dof=k_dof, beta_dof=beta_dof, optim_dof=beta_dof < 1.0)
         super(TAdamW, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -48,33 +53,26 @@ class TAdamW(Optimizer):
                     state['step'] = 0
                     state['exp_avg'] = torch.zeros_like(p_data_fp32)
                     state['exp_avg_sq'] = torch.zeros_like(p_data_fp32)
-                    # Definition of weight W_t
-                    beta1, beta2 = group['betas']
-                    state['W_t'] = torch.tensor(0.0).type_as(p_data_fp32) + beta1 / (1.0 - beta1)
-                    # Dimension d of the parameters
-                    state['dim'] = p.data.numel()
-                    # Degrees of freedom, initialized to the parameters dimension
-                    if not group["k_dof"] == math.inf:
-                        state['dof'] = torch.tensor(0.0).type_as(p_data_fp32) + group["k_dof"] * state['dim']
                 else:
                     state['exp_avg'] = state['exp_avg'].type_as(p_data_fp32)
                     state['exp_avg_sq'] = state['exp_avg_sq'].type_as(p_data_fp32)
-                    state['W_t'] = state['W_t'].type_as(p_data_fp32)
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
                 beta1, beta2 = group['betas']
-                Wt = state['W_t']
+                beta_dof = group["beta_dof"]
+                optim_dof = group["optim_dof"]
 
                 state['step'] += 1
 
                 # Weights computation
-                if group["k_dof"] == math.inf:
-                    betaw = beta1
-                else:
-                    wt = grad.sub(exp_avg).square_().div_(exp_avg_sq.add(group['eps'])).sum()
-                    wt.add_(state['dof']).reciprocal_().mul_(state['dim'] + state['dof'])
-                    betaw = Wt.div(Wt.add(wt))
-                    Wt.add_(wt).mul_(beta1)
+                betaw = tF.get_tema_decay_factor(grad=grad,
+                                                 state=state,
+                                                 group=group,
+                                                 exp_avg=exp_avg,
+                                                 exp_var=exp_avg_sq,
+                                                 beta=beta1,
+                                                 beta_dof=beta_dof,
+                                                 optim_dof=optim_dof)
                 ###
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
                 exp_avg.mul_(betaw).add_(1 - betaw, grad)
