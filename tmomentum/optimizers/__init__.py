@@ -1,5 +1,6 @@
 from .tadam import TAdam
 from .tadamw import TAdamW
+from .teadam import TEAdam
 from .tpadam import TPAdam
 from .tsadam import TSAdam
 from .tradam import TRAdam
@@ -10,3 +11,5 @@ from .tadabelief import TAdaBelief
 from .tlaprop import TLaProp
 from .tdiffgrad import TDiffGrad
 from .tyogi import TYogi
+
+from .roadam import RoAdam

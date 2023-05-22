@@ -1,10 +1,13 @@
 import math
 import torch
 from torch.optim.optimizer import Optimizer
+from . import _temafunctional as tF
 
 class TRAdam(Optimizer):
 
-    def __init__(self, params, lr=1e-3, k_dof=1.0, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, degenerated_to_sgd=True):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
+                 weight_decay=0, amsgrad=False, degenerated_to_sgd=True,
+                 k_dof=1.0, beta_dof=0.999):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -13,15 +16,21 @@ class TRAdam(Optimizer):
             raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+        if not 0.0 <= amsgrad <= 1.0:
+            raise ValueError("Invalid amsgrad parameter: {}".format(amsgrad))
         if not (0.0 <= k_dof or math.inf == k_dof):
             raise ValueError("Invalid degrees of freedom scale factor: {}".format(k_dof))
+        if not 0.0 <= beta_dof <= 1.0:
+            raise ValueError("Invalid beta parameter for dof optimisation: {}".format(beta_dof))
 
         self.degenerated_to_sgd = degenerated_to_sgd
         if isinstance(params, (list, tuple)) and len(params) > 0 and isinstance(params[0], dict):
             for param in params:
                 if 'betas' in param and (param['betas'][0] != betas[0] or param['betas'][1] != betas[1]):
                     param['buffer'] = [[None, None, None] for _ in range(10)]
-        defaults = dict(lr=lr, k_dof=k_dof, betas=betas, eps=eps, weight_decay=weight_decay, buffer=[[None, None, None] for _ in range(10)])
+        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, amsgrad=amsgrad,
+                        buffer=[[None, None, None] for _ in range(10)],
+                        k_dof=k_dof, beta_dof=beta_dof, optim_dof=beta_dof < 1.0)
         super(TRAdam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -47,35 +56,35 @@ class TRAdam(Optimizer):
 
                 state = self.state[p]
 
+                amsgrad = group['amsgrad']
                 if len(state) == 0:
                     state['step'] = 0
                     state['exp_avg'] = torch.zeros_like(p_data_fp32)
                     state['exp_avg_sq'] = torch.zeros_like(p_data_fp32)
-                    # Definition of weight W_t
-                    beta1, beta2 = group['betas']
-                    state['W_t'] = torch.tensor(0.0).type_as(p_data_fp32) + beta1 / (1.0 - beta1)
-                    # Dimension d of the parameters
-                    state['dim'] = float(p.numel())
-                    # Degrees of freedom, initialized to the parameters dimension
-                    if not group["k_dof"] == math.inf:
-                        state['dof'] = torch.tensor(0.0).type_as(p_data_fp32) + group["k_dof"] * state['dim']
+                    if amsgrad:
+                        state['max_exp_avg_sq'] = torch.zeros_like(p_data_fp32)
                 else:
                     state['exp_avg'] = state['exp_avg'].type_as(p_data_fp32)
                     state['exp_avg_sq'] = state['exp_avg_sq'].type_as(p_data_fp32)
-                    state['W_t'] = state['W_t'].type_as(p_data_fp32)
+                    if amsgrad:
+                        state['max_exp_avg_sq'] = state['max_exp_avg_sq'].type_as(p_data_fp32)
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                if amsgrad:
+                    max_exp_avg_sq = state['max_exp_avg_sq'].mul_(amsgrad)
                 beta1, beta2 = group['betas']
-                Wt = state['W_t']
+                beta_dof = group["beta_dof"]
+                optim_dof = group["optim_dof"]
 
                 # Weights computation
-                if group["k_dof"] == math.inf:
-                    betaw = beta1
-                else:
-                    wt = grad.sub(exp_avg).square_().div_(exp_avg_sq.add(group['eps'])).sum()
-                    wt.add_(state['dof']).reciprocal_().mul_(state['dim'] + state['dof'])
-                    betaw = Wt.div(Wt.add(wt))
-                    Wt.add_(wt).mul_(beta1)
+                betaw = tF.get_tema_decay_factor(grad=grad,
+                                                 state=state,
+                                                 group=group,
+                                                 exp_avg=exp_avg,
+                                                 exp_var=exp_avg_sq,
+                                                 beta=beta1,
+                                                 beta_dof=beta_dof,
+                                                 optim_dof=optim_dof)
                 ###
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
                 exp_avg.mul_(betaw).add_(grad, alpha=1 - betaw)
@@ -104,7 +113,11 @@ class TRAdam(Optimizer):
                 if N_sma >= 5:
                     if group['weight_decay'] != 0:
                         p_data_fp32.add_(p_data_fp32, alpha=-group['weight_decay'] * group['lr'])
-                    denom = exp_avg_sq.sqrt().add_(group['eps'])
+                    if amsgrad:
+                        torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
+                        denom = max_exp_avg_sq.sqrt().add_(group['eps'])
+                    else:
+                        denom = exp_avg_sq.sqrt().add_(group['eps'])
                     p_data_fp32.addcdiv_(exp_avg, denom, value=-step_size * group['lr'])
                     p.data.copy_(p_data_fp32)
                 elif step_size > 0:
@@ -122,7 +135,9 @@ class TRAdam(Optimizer):
 
 class TPlainRAdam(Optimizer):
 
-    def __init__(self, params, lr=1e-3, k_dof=1.0, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, degenerated_to_sgd=True):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
+                 weight_decay=0, amsgrad=False, degenerated_to_sgd=True,
+                 k_dof=1.0, beta_dof=0.999):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -131,11 +146,17 @@ class TPlainRAdam(Optimizer):
             raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+        if not 0.0 <= amsgrad <= 1.0:
+            raise ValueError("Invalid amsgrad parameter: {}".format(amsgrad))
         if not (0.0 <= k_dof or math.inf == k_dof):
             raise ValueError("Invalid degrees of freedom scale factor: {}".format(k_dof))
+        if not 0.0 <= beta_dof <= 1.0:
+            raise ValueError("Invalid beta parameter for dof optimisation: {}".format(beta_dof))
 
         self.degenerated_to_sgd = degenerated_to_sgd
-        defaults = dict(lr=lr, k_dof=k_dof, betas=betas, eps=eps, weight_decay=weight_decay)
+        defaults = dict(lr=lr, betas=betas, eps=eps,
+                        weight_decay=weight_decay, amsgrad=amsgrad,
+                        k_dof=k_dof, beta_dof=beta_dof, optim_dof=beta_dof < 1.0)
 
         super(TPlainRAdam, self).__init__(params, defaults)
 
@@ -161,35 +182,35 @@ class TPlainRAdam(Optimizer):
 
                 state = self.state[p]
 
+                amsgrad = group['amsgrad']
                 if len(state) == 0:
                     state['step'] = 0
                     state['exp_avg'] = torch.zeros_like(p_data_fp32)
                     state['exp_avg_sq'] = torch.zeros_like(p_data_fp32)
-                    # Definition of weight W_t
-                    beta1, beta2 = group['betas']
-                    state['W_t'] = torch.tensor(0.).type_as(p_data_fp32) + beta1 / (1.0 - beta1)
-                    # Dimension d of the parameters
-                    state['dim'] = p.data.numel()
-                    # Degrees of freedom, initialized to the parameters dimension
-                    if not group["k_dof"] == math.inf:
-                        state['dof'] = torch.tensor(0.) + group["k_dof"] * state['dim']
+                    if amsgrad:
+                        state['max_exp_avg_sq'] = torch.zeros_like(p_data_fp32)
                 else:
                     state['exp_avg'] = state['exp_avg'].type_as(p_data_fp32)
                     state['exp_avg_sq'] = state['exp_avg_sq'].type_as(p_data_fp32)
-                    state['W_t'] = state['W_t'].type_as(p_data_fp32)
+                    if amsgrad:
+                        state['max_exp_avg_sq'] = state['max_exp_avg_sq'].type_as(p_data_fp32)
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                if amsgrad:
+                    max_exp_avg_sq = state['max_exp_avg_sq'].mul_(amsgrad)
                 beta1, beta2 = group['betas']
-                Wt = state['W_t']
+                beta_dof = group["beta_dof"]
+                optim_dof = group["optim_dof"]
 
                 # Weights computation
-                if group["k_dof"] == math.inf:
-                    betaw = beta1
-                else:
-                    wt = grad.sub(exp_avg).square_().div_(exp_avg_sq.add(group['eps'])).sum()
-                    wt.add_(state['dof']).reciprocal_().mul_(state['dim'] + state['dof'])
-                    betaw = Wt.div(Wt.add(wt))
-                    Wt.add_(wt).mul_(beta1)
+                betaw = tF.get_tema_decay_factor(grad=grad,
+                                                 state=state,
+                                                 group=group,
+                                                 exp_avg=exp_avg,
+                                                 exp_var=exp_avg_sq,
+                                                 beta=beta1,
+                                                 beta_dof=beta_dof,
+                                                 optim_dof=optim_dof)
                 ###
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
                 exp_avg.mul_(betaw).add_(grad, alpha=1 - betaw)
@@ -205,7 +226,11 @@ class TPlainRAdam(Optimizer):
                     if group['weight_decay'] != 0:
                         p_data_fp32.add_(p_data_fp32, alpha=-group['weight_decay'] * group['lr'])
                     step_size = group['lr'] * math.sqrt((1 - beta2_t) * (N_sma - 4) / (N_sma_max - 4) * (N_sma - 2) / N_sma * N_sma_max / (N_sma_max - 2)) / (1 - beta1 ** state['step'])
-                    denom = exp_avg_sq.sqrt().add_(group['eps'])
+                    if amsgrad:
+                        torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
+                        denom = max_exp_avg_sq.sqrt().add_(group['eps'])
+                    else:
+                        denom = exp_avg_sq.sqrt().add_(group['eps'])
                     p_data_fp32.addcdiv_(exp_avg, denom, value=-step_size)
                     p.data.copy_(p_data_fp32)
                 elif self.degenerated_to_sgd:

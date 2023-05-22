@@ -3,6 +3,7 @@
 import math
 import torch
 from torch.optim import Optimizer
+from . import _temafunctional as tF
 
 class TLaProp(Optimizer):
     r"""Implements a Robust version of LaProp.
@@ -11,8 +12,9 @@ class TLaProp(Optimizer):
         https://arxiv.org/abs/2002.04839
     """
 
-    def __init__(self, params, lr=1e-3, k_dof=1.0, betas=(0.9, 0.999),
-                 eps=1e-8, weight_decay=0, amsgrad=False):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999),
+                 eps=1e-8, weight_decay=0, amsgrad=False,
+                 k_dof=1.0, beta_dof=0.999):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -21,12 +23,15 @@ class TLaProp(Optimizer):
             raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
-        if not (0.0 < k_dof or math.inf == k_dof):
-            raise ValueError("Invalid degrees of freedom scale factor: {}".format(k_dof))
         if not 0.0 <= amsgrad <= 1.0:
             raise ValueError("Invalid amsgrad parameter: {}".format(amsgrad))
-        defaults = dict(lr=lr, k_dof=k_dof, betas=betas, eps=eps,
-                        weight_decay=weight_decay, amsgrad=amsgrad)
+        if not (0.0 < k_dof or math.inf == k_dof):
+            raise ValueError("Invalid degrees of freedom scale factor: {}".format(k_dof))
+        if not 0.0 <= beta_dof <= 1.0:
+            raise ValueError("Invalid beta parameter for dof optimisation: {}".format(beta_dof))
+        defaults = dict(lr=lr, betas=betas, eps=eps,
+                        weight_decay=weight_decay, amsgrad=amsgrad,
+                        k_dof=k_dof, beta_dof=beta_dof, optim_dof=beta_dof < 1.0)
         super(TLaProp, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -55,6 +60,8 @@ class TLaProp(Optimizer):
                     raise RuntimeError('TLaProp, just as Adam, does not support sparse gradients, please consider SparseAdam instead')
                 amsgrad = group['amsgrad']
                 beta1, beta2 = group['betas']
+                beta_dof = group["beta_dof"]
+                optim_dof = group["optim_dof"]
 
                 state = self.state[p]
 
@@ -68,16 +75,8 @@ class TLaProp(Optimizer):
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
                         state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    # Definition of weight W_t
-                    state['W_t'] = torch.tensor(0.0).type_as(p) + beta1 / (1.0 - beta1)
-                    # Dimension d of the parameters
-                    state['dim'] = float(p.numel())
-                    # Degrees of freedom, initialized to the parameters dimension or to the user specified value
-                    if not group["k_dof"] == math.inf:
-                        state['dof'] = torch.tensor(0.0).type_as(p) + group["k_dof"] * state['dim']
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
-                Wt = state['W_t']
                 if amsgrad:
                     max_exp_avg_sq = state['max_exp_avg_sq'].mul_(amsgrad)
 
@@ -101,13 +100,14 @@ class TLaProp(Optimizer):
                 # laprop
                 # first-order momentum
                 gv = grad.div(denom)
-                if group["k_dof"] == math.inf:
-                    betaw = beta1
-                else:
-                    wt = gv.sub(exp_avg).square_().sum()
-                    wt.add_(state['dof']).reciprocal_().mul_(state['dim'] + state['dof'])
-                    betaw = Wt.div(Wt.add(wt))
-                    Wt.add_(wt).mul_(beta1)
+                betaw = tF.get_tema_decay_factor(grad=gv,
+                                                 state=state,
+                                                 group=group,
+                                                 exp_avg=exp_avg,
+                                                 exp_var=torch.ones_like(p, memory_format=torch.preserve_format),
+                                                 beta=beta1,
+                                                 beta_dof=beta_dof,
+                                                 optim_dof=optim_dof)
                 exp_avg.mul_(betaw).add_(gv, alpha=1.0 - betaw)
 
                 # update parameter

@@ -1,6 +1,7 @@
 import math
 import torch
 from torch.optim.optimizer import Optimizer
+from . import _temafunctional as tF
 
 class TSAdam(Optimizer):
     r"""Implements a robust version of SAdam algorithm.
@@ -24,8 +25,9 @@ class TSAdam(Optimizer):
         https://arxiv.org/abs/1706.05507
     """
 
-    def __init__(self, params, lr=1e-3, k_dof=1.0, beta1=0.9, gamma=None, eps=1e-2,
-                 xis=(0.1, 1.), weight_decay=0, vary_eps=False):
+    def __init__(self, params, lr=1e-3, beta1=0.9, gamma=None, eps=1e-2,
+                 xis=(0.1, 1.), weight_decay=0, vary_eps=False,
+                 k_dof=1.0, beta_dof=0.999):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -45,8 +47,11 @@ class TSAdam(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if not (0.0 < k_dof or math.inf == k_dof):
             raise ValueError("Invalid degrees of freedom scale factor: {}".format(k_dof))
-        defaults = dict(lr=lr, k_dof=k_dof, beta1=beta1, gamma=gamma, xis=xis, eps=eps,
-                        weight_decay=weight_decay, vary_eps=vary_eps)
+        if not 0.0 <= beta_dof <= 1.0:
+            raise ValueError("Invalid beta parameter for dof optimisation: {}".format(beta_dof))
+        defaults = dict(lr=lr, beta1=beta1, gamma=gamma, xis=xis, eps=eps,
+                        weight_decay=weight_decay, vary_eps=vary_eps,
+                        k_dof=k_dof, beta_dof=beta_dof, optim_dof=beta_dof < 1.0)
         super(TSAdam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -74,6 +79,8 @@ class TSAdam(Optimizer):
                 if grad.is_sparse:
                     raise RuntimeError('TSAdam does not support sparse gradients, please consider SparseAdam instead')
                 vary_eps = group['vary_eps']
+                beta_dof = group["beta_dof"]
+                optim_dof = group["optim_dof"]
 
                 state = self.state[p]
 
@@ -84,17 +91,8 @@ class TSAdam(Optimizer):
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
                     state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    # Definition of weight W_t
-                    beta1 = group['beta1']
-                    state['W_t'] = torch.tensor(0.0).type_as(p) + beta1 / (1.0 - beta1)
-                    # Dimension d of the parameters
-                    state['dim'] = float(p.numel())
-                    # Degrees of freedom, initialized to the parameters dimension or to the user specified value
-                    if not group["k_dof"] == math.inf:
-                        state['dof'] = torch.tensor(0.0).type_as(p) + group["k_dof"] * state['dim']
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
-                Wt = state['W_t']
                 if vary_eps:
                     xi1, xi2 = group['xis']
                 beta1, gamma = group['beta1'], group['gamma']
@@ -105,13 +103,14 @@ class TSAdam(Optimizer):
                     grad = grad.add(p, alpha=group['weight_decay'])
 
                 # Weights computation
-                if group["k_dof"] == math.inf:
-                    betaw = beta1
-                else:
-                    wt = grad.sub(exp_avg).square_().div_(exp_avg_sq.add(group['eps'])).sum()
-                    wt.add_(state['dof']).reciprocal_().mul_(state['dim'] + state['dof'])
-                    betaw = Wt.div(Wt.add(wt))
-                    Wt.add_(wt).mul_(beta1)
+                betaw = tF.get_tema_decay_factor(grad=grad,
+                                                 state=state,
+                                                 group=group,
+                                                 exp_avg=exp_avg,
+                                                 exp_var=exp_avg_sq,
+                                                 beta=beta1,
+                                                 beta_dof=beta_dof,
+                                                 optim_dof=optim_dof)
                 # Decay the first and second moment running average coefficient
                 exp_avg.mul_(betaw).add_(grad, alpha=1 - betaw)
                 beta2 = 1 - (gamma / state['step'])
