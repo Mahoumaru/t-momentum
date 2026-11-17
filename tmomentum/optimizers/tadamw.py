@@ -34,18 +34,21 @@ class TAdamW(Optimizer):
     def step(self, closure=None):
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
 
             for p in group['params']:
                 if p.grad is None:
                     continue
-                grad = p.grad.data.float()
+                grad = p.grad.detach().to(
+                    dtype=torch.float32 if p.dtype in (torch.float16, torch.bfloat16) else p.dtype)
                 if grad.is_sparse:
                     raise RuntimeError('TAdamW does not support sparse gradients, please consider SparseAdam instead')
 
-                p_data_fp32 = p.data.float()
+                p_data_fp32 = p.detach().to(
+                    dtype=torch.float32 if p.dtype in (torch.float16, torch.bfloat16) else p.dtype)
 
                 state = self.state[p]
 
@@ -75,11 +78,13 @@ class TAdamW(Optimizer):
                                                  optim_dof=optim_dof)
                 ###
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-                exp_avg.mul_(betaw).add_(1 - betaw, grad)
+                exp_avg.mul_(betaw).add_(grad, alpha=1 - betaw)
 
-                denom = exp_avg_sq.sqrt().add_(group['eps'])
                 bias_correction1 = 1 - beta1 ** state['step']
                 bias_correction2 = 1 - beta2 ** state['step']
+                # Historical (pre-correction) TAdamW epsilon placement:
+                # preserve the original update rule for controlled experiments.
+                denom = exp_avg_sq.sqrt().add_(group['eps'])
 
                 if group['warmup'] > state['step']:
                     scheduled_lr = 1e-8 + state['step'] * group['lr'] / group['warmup']
@@ -89,10 +94,10 @@ class TAdamW(Optimizer):
                 step_size = scheduled_lr * math.sqrt(bias_correction2) / bias_correction1
 
                 if group['weight_decay'] != 0:
-                    p_data_fp32.add_(-group['weight_decay'] * scheduled_lr, p_data_fp32)
+                    p_data_fp32.add_(p_data_fp32, alpha=-group['weight_decay'] * scheduled_lr)
 
                 p_data_fp32.addcdiv_(exp_avg, denom, value=-step_size)
 
-                p.data.copy_(p_data_fp32)
+                p.copy_(p_data_fp32)
 
         return loss

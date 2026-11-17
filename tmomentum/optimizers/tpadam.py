@@ -41,13 +41,14 @@ class TPAdam(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
-                grad = p.grad.data
+                grad = p.grad.detach()
                 if grad.is_sparse:
                     raise RuntimeError('TPAdam, just as Adam, does not support sparse gradients, please consider SparseAdam instead')
                 amsgrad = group['amsgrad']
@@ -76,7 +77,7 @@ class TPAdam(Optimizer):
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    grad.add_(p, alpha=group['weight_decay'])
+                    grad = grad.add(p, alpha=group['weight_decay'])
 
                 # Weights computation
                 betaw = tF.get_tema_decay_factor(grad=grad,
@@ -102,6 +103,6 @@ class TPAdam(Optimizer):
                 bias_correction2 = 1 - beta2 ** state['step']
                 step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
 
-                p.data.addcdiv_(exp_avg, denom**(partial*2), value=-step_size)
+                p.addcdiv_(exp_avg, denom**(partial*2), value=-step_size)
 
         return loss

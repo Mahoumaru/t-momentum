@@ -1,4 +1,7 @@
 # t-momentum
+
+> **Experimental compatibility-only variant:** original Student-t and TAdamW numerical behavior retained. See [OLD_BEHAVIOR_NOTES.md](OLD_BEHAVIOR_NOTES.md) before use.
+
 ## A Stochastic Gradient momentum based on a Student-t distribution Exponential Moving Average
 
  Official repository for the t-momentum algorithm.
