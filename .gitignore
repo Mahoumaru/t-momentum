@@ -170,4 +170,10 @@ dmypy.json
 # profiling data
 .prof
 
+# Local regression tests
+/tests/
+
+# GitHub Actions workflows
+/.github/workflows/
+
 # End of https://www.toptal.com/developers/gitignore/api/macos,python
