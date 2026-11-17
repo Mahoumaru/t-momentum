@@ -8,7 +8,7 @@ GOAL: Make easier the integration of the t-momentum algorithm to new optimizers.
 """
 class TMomentum(object):
     def __init__(self, k_dof=math.inf, eps=1e-6):#, estimate_kdof=False, kdof_estim_type="avg"):
-        super(TMomentum, self).__init__(k_dof)
+        super(TMomentum, self).__init__()
         self.k_dof = k_dof
         self.eps = eps
         """ ## kdof_estimator: TO BE IMPLEMENTED ##

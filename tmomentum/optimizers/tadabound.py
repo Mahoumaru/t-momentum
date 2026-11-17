@@ -54,7 +54,8 @@ class TAdaBound(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group, base_lr in zip(self.param_groups, self.base_lrs):
             for p in group['params']:

@@ -41,18 +41,21 @@ class TRAdam(Optimizer):
 
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
 
             for p in group['params']:
                 if p.grad is None:
                     continue
-                grad = p.grad.data.float()
+                grad = p.grad.detach().to(
+                    dtype=torch.float32 if p.dtype in (torch.float16, torch.bfloat16) else p.dtype)
                 if grad.is_sparse:
                     raise RuntimeError('TRAdam, just as Adam, does not support sparse gradients')
 
-                p_data_fp32 = p.data.float()
+                p_data_fp32 = p.detach().to(
+                    dtype=torch.float32 if p.dtype in (torch.float16, torch.bfloat16) else p.dtype)
 
                 state = self.state[p]
 
@@ -76,6 +79,8 @@ class TRAdam(Optimizer):
                 beta_dof = group["beta_dof"]
                 optim_dof = group["optim_dof"]
 
+                state['step'] += 1
+
                 # Weights computation
                 betaw = tF.get_tema_decay_factor(grad=grad,
                                                  state=state,
@@ -89,7 +94,6 @@ class TRAdam(Optimizer):
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
                 exp_avg.mul_(betaw).add_(grad, alpha=1 - betaw)
 
-                state['step'] += 1
                 buffered = group['buffer'][int(state['step'] % 10)]
                 if state['step'] == buffered[0]:
                     N_sma, step_size = buffered[1], buffered[2]
@@ -119,12 +123,12 @@ class TRAdam(Optimizer):
                     else:
                         denom = exp_avg_sq.sqrt().add_(group['eps'])
                     p_data_fp32.addcdiv_(exp_avg, denom, value=-step_size * group['lr'])
-                    p.data.copy_(p_data_fp32)
+                    p.copy_(p_data_fp32)
                 elif step_size > 0:
                     if group['weight_decay'] != 0:
                         p_data_fp32.add_(p_data_fp32, alpha=-group['weight_decay'] * group['lr'])
                     p_data_fp32.add_(exp_avg, alpha=-step_size * group['lr'])
-                    p.data.copy_(p_data_fp32)
+                    p.copy_(p_data_fp32)
 
         return loss
 
@@ -163,22 +167,26 @@ class TPlainRAdam(Optimizer):
     def __setstate__(self, state):
         super(TPlainRAdam, self).__setstate__(state)
 
+    @torch.no_grad()
     def step(self, closure=None):
 
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
 
             for p in group['params']:
                 if p.grad is None:
                     continue
-                grad = p.grad.data.float()
+                grad = p.grad.detach().to(
+                    dtype=torch.float32 if p.dtype in (torch.float16, torch.bfloat16) else p.dtype)
                 if grad.is_sparse:
                     raise RuntimeError('TPlainRAdam, just as Adam and TRAdam, does not support sparse gradients')
 
-                p_data_fp32 = p.data.float()
+                p_data_fp32 = p.detach().to(
+                    dtype=torch.float32 if p.dtype in (torch.float16, torch.bfloat16) else p.dtype)
 
                 state = self.state[p]
 
@@ -202,6 +210,8 @@ class TPlainRAdam(Optimizer):
                 beta_dof = group["beta_dof"]
                 optim_dof = group["optim_dof"]
 
+                state['step'] += 1
+
                 # Weights computation
                 betaw = tF.get_tema_decay_factor(grad=grad,
                                                  state=state,
@@ -215,7 +225,6 @@ class TPlainRAdam(Optimizer):
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
                 exp_avg.mul_(betaw).add_(grad, alpha=1 - betaw)
 
-                state['step'] += 1
                 beta2_t = beta2 ** state['step']
                 N_sma_max = 2 / (1 - beta2) - 1
                 N_sma = N_sma_max - 2 * state['step'] * beta2_t / (1 - beta2_t)
@@ -232,12 +241,12 @@ class TPlainRAdam(Optimizer):
                     else:
                         denom = exp_avg_sq.sqrt().add_(group['eps'])
                     p_data_fp32.addcdiv_(exp_avg, denom, value=-step_size)
-                    p.data.copy_(p_data_fp32)
+                    p.copy_(p_data_fp32)
                 elif self.degenerated_to_sgd:
                     if group['weight_decay'] != 0:
                         p_data_fp32.add_(p_data_fp32, alpha=-group['weight_decay'] * group['lr'])
                     step_size = group['lr'] / (1 - beta1 ** state['step'])
                     p_data_fp32.add_(exp_avg, alpha=-step_size)
-                    p.data.copy_(p_data_fp32)
+                    p.copy_(p_data_fp32)
 
         return loss
